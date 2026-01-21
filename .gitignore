@@ -1,4 +1,8 @@
 node_modules/
 config/config.json
 .env
+.env.local
+.env.*.local
 *.log
+.DS_Store
+debug-page.png
