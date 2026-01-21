@@ -1,0 +1,7 @@
+{
+  "booking_url": "https://calendar.google.com/calendar/appointments/YOUR_LINK",
+  "preferences": ["Tue 3pm", "Thu 2pm", "Wed 4pm"],
+  "active": false,
+  "email": "your@email.com",
+  "consecutive_failures": 0
+}
