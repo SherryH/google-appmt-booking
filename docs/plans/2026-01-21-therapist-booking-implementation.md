@@ -1534,11 +1534,19 @@ git commit -m "chore: add Replit deployment configuration"
 
 | Slice | Status | Automated Tests | Human Verification |
 |-------|--------|-----------------|-------------------|
-| 1. CLI + Config | ⬜ | config.test.js | npm run status |
+| 1. CLI + Config | 🔄 | config.test.js | npm run status |
 | 2. Booking Flow (mocked) | ⬜ | matcher.test.js, booking-service.test.js | npm run book --mock |
 | 3. Email Notifications | ⬜ | notifier.test.js | Receive email |
 | 4. Real Scraper | ⬜ | (manual) | Book on test calendar |
 | 5. Replit Deployment | ⬜ | (manual) | Full flow on Replit |
+
+## Progress Log
+
+| Task | Status | Commit | Date |
+|------|--------|--------|------|
+| 1.1 Initialize Project | ✅ | d413cc9 | 2026-01-21 |
+| 1.2 Config Module with Tests | ✅ | 809f4b0 | 2026-01-21 |
+| 1.3 CLI Entry Point | ⬜ | - | - |
 
 **Key files:**
 ```
