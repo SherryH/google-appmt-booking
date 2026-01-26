@@ -1,5 +1,11 @@
 import { loadConfig, saveConfig } from './config.js';
 import { BookingService } from './booking-service.js';
+import {
+  initNotifier,
+  sendBookingSuccess,
+  sendBookingFailure,
+  shouldNotifyFailure
+} from './notifier.js';
 import readline from 'readline';
 
 const COMMANDS = {
@@ -86,6 +92,9 @@ async function runBooking() {
     return;
   }
 
+  // Initialize notifier
+  initNotifier(process.env.RESEND_API_KEY);
+
   // Mock slots for testing
   const mockSlots = useMock ? [
     { text: 'Monday 9:00 AM', normalized: 'mon 9am' },
@@ -103,6 +112,12 @@ async function runBooking() {
     if (result.success) {
       console.log(`\n🎉 SUCCESS! ${result.dryRun ? '(DRY RUN) Would book' : 'Booked'}: ${result.slot.text}`);
       config.consecutive_failures = 0;
+
+      // Send success email
+      if (!result.dryRun) {
+        await sendBookingSuccess(config.email, result.slot);
+      }
+
     } else {
       config.consecutive_failures += 1;
       console.log(`\n❌ Booking failed: ${result.reason}`);
@@ -110,6 +125,16 @@ async function runBooking() {
 
       if (result.availableSlots?.length > 0) {
         console.log(`   Available slots: ${result.availableSlots.join(', ')}`);
+      }
+
+      // Send failure email if threshold reached
+      if (shouldNotifyFailure(config.consecutive_failures)) {
+        await sendBookingFailure(
+          config.email,
+          result.reason,
+          config.consecutive_failures,
+          result.availableSlots
+        );
       }
     }
 
@@ -119,6 +144,15 @@ async function runBooking() {
     console.error(`\n💥 Error: ${error.message}`);
     config.consecutive_failures += 1;
     await saveConfig(config);
+
+    if (shouldNotifyFailure(config.consecutive_failures)) {
+      await sendBookingFailure(
+        config.email,
+        error.message,
+        config.consecutive_failures,
+        []
+      );
+    }
   }
 }
 
