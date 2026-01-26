@@ -1,10 +1,12 @@
 import { loadConfig, saveConfig } from './config.js';
+import { BookingService } from './booking-service.js';
 import readline from 'readline';
 
 const COMMANDS = {
   activate: activateJob,
   deactivate: deactivateJob,
   status: showStatus,
+  book: runBooking,
   menu: showMenu,
 };
 
@@ -39,7 +41,7 @@ async function showMenu() {
       case '1': await activateJob(); break;
       case '2': await showStatus(); break;
       case '3': await deactivateJob(); break;
-      case '4': console.log('⚠️  Booking not implemented yet'); break;
+      case '4': await runBooking(); break;
       case '5': process.exit(0);
       default: console.log('Invalid choice');
     }
@@ -71,4 +73,55 @@ async function showStatus() {
   console.log(`   Consecutive failures: ${config.consecutive_failures}\n`);
 }
 
+async function runBooking() {
+  const isDryRun = process.argv.includes('--dry-run');
+  const useMock = process.argv.includes('--mock');
+
+  console.log('\n🚀 Starting booking attempt...\n');
+
+  const config = await loadConfig();
+
+  if (!config.active && !process.argv.includes('--force')) {
+    console.log('⚠️  Job is not active. Use --force to run anyway.');
+    return;
+  }
+
+  // Mock slots for testing
+  const mockSlots = useMock ? [
+    { text: 'Monday 9:00 AM', normalized: 'mon 9am' },
+    { text: 'Tuesday 3:00 PM', normalized: 'tue 3pm' },
+    { text: 'Wednesday 4:00 PM', normalized: 'wed 4pm' },
+    { text: 'Thursday 2:00 PM', normalized: 'thu 2pm' },
+    { text: 'Friday 11:00 AM', normalized: 'fri 11am' },
+  ] : null;
+
+  const service = new BookingService({ dryRun: isDryRun || useMock });
+
+  try {
+    const result = await service.attemptBooking(config, mockSlots);
+
+    if (result.success) {
+      console.log(`\n🎉 SUCCESS! ${result.dryRun ? '(DRY RUN) Would book' : 'Booked'}: ${result.slot.text}`);
+      config.consecutive_failures = 0;
+    } else {
+      config.consecutive_failures += 1;
+      console.log(`\n❌ Booking failed: ${result.reason}`);
+      console.log(`   Consecutive failures: ${config.consecutive_failures}`);
+
+      if (result.availableSlots?.length > 0) {
+        console.log(`   Available slots: ${result.availableSlots.join(', ')}`);
+      }
+    }
+
+    await saveConfig(config);
+
+  } catch (error) {
+    console.error(`\n💥 Error: ${error.message}`);
+    config.consecutive_failures += 1;
+    await saveConfig(config);
+  }
+}
+
 main().catch(console.error);
+
+export { runBooking };
