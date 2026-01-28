@@ -1534,9 +1534,9 @@ git commit -m "chore: add Replit deployment configuration"
 
 | Slice | Status | Automated Tests | Human Verification |
 |-------|--------|-----------------|-------------------|
-| 1. CLI + Config | 🔄 | config.test.js | npm run status |
-| 2. Booking Flow (mocked) | ⬜ | matcher.test.js, booking-service.test.js | npm run book --mock |
-| 3. Email Notifications | ⬜ | notifier.test.js | Receive email |
+| 1. CLI + Config | ✅ | config.test.js | npm run status |
+| 2. Booking Flow (mocked) | ✅ | matcher.test.js, booking-service.test.js | npm run book --mock |
+| 3. Email Notifications | ✅ | notifier.test.js | Receive email |
 | 4. Real Scraper | ⬜ | (manual) | Book on test calendar |
 | 5. Replit Deployment | ⬜ | (manual) | Full flow on Replit |
 
@@ -1546,7 +1546,12 @@ git commit -m "chore: add Replit deployment configuration"
 |------|--------|--------|------|
 | 1.1 Initialize Project | ✅ | d413cc9 | 2026-01-21 |
 | 1.2 Config Module with Tests | ✅ | 809f4b0 | 2026-01-21 |
-| 1.3 CLI Entry Point | ⬜ | - | - |
+| 1.3 CLI Entry Point | ✅ | c3ba8cf | 2026-01-28 |
+| 2.1 Slot Matching Logic | ✅ | (merged) | 2026-01-28 |
+| 2.2 Booking Service | ✅ | (merged) | 2026-01-28 |
+| 2.3 Integrate into CLI | ✅ | (merged) | 2026-01-28 |
+| 3.1 Notifier Module | ✅ | (merged) | 2026-01-28 |
+| 3.2 Integrate Notifications | ✅ | (merged) | 2026-01-28 |
 
 **Key files:**
 ```
