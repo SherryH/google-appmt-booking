@@ -5,4 +5,7 @@ config/config.json
 .env.*.local
 *.log
 .DS_Store
-debug-page.png
+
+# Debug and test screenshots/html
+*.png
+debug-*.html

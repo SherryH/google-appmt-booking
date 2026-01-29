@@ -288,45 +288,74 @@ export class GoogleCalendarScraper {
 
   /**
    * Check if "Jump to next bookable date" link exists and click it
+   * Uses Puppeteer's native click for proper event handling
    * @returns {boolean} True if jumped, false if link not found
    */
   async tryJumpToNextDate() {
     try {
-      const jumpLink = await this.page.$('a[href*="jump"], button:has-text("Jump"), [role="link"]:has-text("Jump")');
+      // First, find the element and get its bounding box for native click
+      const elementInfo = await this.page.evaluate(() => {
+        // Walk through all elements and find the smallest one with jump text
+        const walker = document.createTreeWalker(
+          document.body,
+          NodeFilter.SHOW_ELEMENT,
+          null,
+          false
+        );
 
-      if (!jumpLink) {
-        // Try text-based search
-        const jumped = await this.page.evaluate(() => {
-          const elements = Array.from(document.querySelectorAll('a, button, [role="link"], [role="button"]'));
-          const jumpEl = elements.find(el =>
-            el.textContent?.toLowerCase().includes('jump to') ||
-            el.textContent?.toLowerCase().includes('next bookable')
-          );
+        let bestMatch = null;
+        let bestMatchLength = Infinity;
 
-          if (jumpEl) {
-            jumpEl.click();
-            return true;
+        while (walker.nextNode()) {
+          const el = walker.currentNode;
+          const text = el.textContent?.trim() || '';
+          const lowerText = text.toLowerCase();
+
+          if (lowerText.includes('jump to') && lowerText.includes('bookable')) {
+            if (text.length < bestMatchLength) {
+              bestMatch = el;
+              bestMatchLength = text.length;
+            }
           }
-          return false;
-        });
-
-        if (jumped) {
-          this.log('Clicked "Jump to next bookable date" via text search');
-          await this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }).catch(() => {});
-          await new Promise(r => setTimeout(r, 2000)); // Wait for content to load
-          return true;
         }
 
-        return false;
+        if (bestMatch && bestMatchLength < 50) {
+          const rect = bestMatch.getBoundingClientRect();
+          return {
+            found: true,
+            text: bestMatch.textContent?.trim(),
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+            width: rect.width,
+            height: rect.height
+          };
+        }
+
+        return { found: false };
+      });
+
+      if (elementInfo.found) {
+        this.log(`Found Jump link: "${elementInfo.text}" at (${elementInfo.x}, ${elementInfo.y})`);
+
+        // Use Puppeteer's native click which properly triggers events
+        await this.page.mouse.click(elementInfo.x, elementInfo.y);
+
+        this.log('Clicked with native mouse event, waiting for navigation...');
+
+        // Wait for navigation or content update
+        await Promise.race([
+          this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }),
+          new Promise(r => setTimeout(r, 5000)) // Longer fallback for SPA navigation
+        ]).catch(() => {});
+
+        await new Promise(r => setTimeout(r, 2000)); // Extra wait for content to render
+        return true;
       }
 
-      await jumpLink.click();
-      this.log('Clicked "Jump to next bookable date"');
-      await this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }).catch(() => {});
-      await new Promise(r => setTimeout(r, 2000));
-      return true;
+      this.log('Jump link not found on page');
+      return false;
     } catch (error) {
-      this.log('Jump link not found or click failed', error.message);
+      this.log('Jump link error', error.message);
       return false;
     }
   }
