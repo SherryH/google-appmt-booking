@@ -1,7 +1,11 @@
 {
-  "booking_url": "https://calendar.google.com/calendar/appointments/YOUR_LINK",
+  "booking_url": "https://calendar.google.com/calendar/appointments/YOUR_BOOKING_SCHEDULE_LINK",
   "preferences": ["Tue 3pm", "Thu 2pm", "Wed 4pm"],
   "active": false,
   "email": "your@email.com",
+  "first_name": "Your First Name",
+  "last_name": "Your Last Name",
+  "phone": "Your Phone Number",
+  "max_weeks_to_search": 4,
   "consecutive_failures": 0
 }

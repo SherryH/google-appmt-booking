@@ -56,9 +56,23 @@ export class BookingService {
       };
     }
 
-    // Real booking (to be implemented with Puppeteer)
+    // Real booking with Puppeteer
     if (this.scraper && this.scraper.book) {
-      const booked = await this.scraper.book(matchedSlot, config.email);
+      const userInfo = {
+        email: config.email,
+        firstName: config.first_name || '',
+        lastName: config.last_name || '',
+        phone: config.phone || null,
+      };
+
+      console.log(`📝 Booking slot: ${matchedSlot.text}`);
+      const booked = await this.scraper.book(matchedSlot, userInfo);
+
+      // Close the browser after booking attempt
+      if (this.scraper.close) {
+        await this.scraper.close();
+      }
+
       return {
         success: booked,
         slot: matchedSlot,

@@ -1,5 +1,6 @@
 import { loadConfig, saveConfig } from './config.js';
 import { BookingService } from './booking-service.js';
+import { GoogleCalendarScraper } from './scraper.js';
 import {
   initNotifier,
   sendBookingSuccess,
@@ -82,6 +83,7 @@ async function showStatus() {
 async function runBooking() {
   const isDryRun = process.argv.includes('--dry-run');
   const useMock = process.argv.includes('--mock');
+  const isDebug = process.argv.includes('--debug');
 
   console.log('\n🚀 Starting booking attempt...\n');
 
@@ -104,7 +106,26 @@ async function runBooking() {
     { text: 'Friday 11:00 AM', normalized: 'fri 11am' },
   ] : null;
 
-  const service = new BookingService({ dryRun: isDryRun || useMock });
+  // Create real scraper if not using mock
+  let scraper = null;
+  if (!useMock) {
+    const maxWeeks = config.max_weeks_to_search || 4;
+    scraper = new GoogleCalendarScraper({
+      headless: !isDebug,
+      debug: isDebug,
+      maxWeeks: maxWeeks,
+    });
+
+    if (isDebug) {
+      console.log('🔧 Debug mode enabled - browser will be visible, screenshots saved');
+      console.log(`📅 Will search up to ${maxWeeks} weeks ahead`);
+    }
+  }
+
+  const service = new BookingService({
+    dryRun: isDryRun || useMock,
+    scraper: scraper,
+  });
 
   try {
     const result = await service.attemptBooking(config, mockSlots);

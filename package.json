@@ -8,7 +8,13 @@
     "status": "node src/index.js status",
     "deactivate": "node src/index.js deactivate",
     "book": "node src/index.js book",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:setup:slots-visible": "cd scripts/calendar-test && clasp run setupSlotsVisible",
+    "test:setup:no-slots-week": "cd scripts/calendar-test && clasp run setupNoSlotsThisWeek",
+    "test:setup:no-availability": "cd scripts/calendar-test && clasp run setupNoAvailability",
+    "test:setup:tuesday-3pm": "cd scripts/calendar-test && clasp run setupTuesday3pmOnly",
+    "test:setup:clear": "cd scripts/calendar-test && clasp run clearAllTestBlocks",
+    "test:setup:list": "cd scripts/calendar-test && clasp run listTestBlocks"
   },
   "engines": {
     "node": ">=18.0.0"
