@@ -1194,33 +1194,235 @@ git commit -m "feat: integrate email notifications into booking flow"
 
 ---
 
-## Slice 4: Real Scraper (The Unknown)
+## Slice 4: Real Scraper Implementation
 
-**Goal:** Scrape actual Google Calendar appointment page and book real slots.
+**Goal:** Build Puppeteer scraper to extract real slots from Google Calendar appointment page and book appointments.
 
-**Checkpoint:** Successfully book an appointment on your test Google Calendar.
+**Checkpoint:** Successfully book an appointment on your test Google Calendar with automated test setup.
 
-**⚠️ This slice requires iteration** - page structure is unknown until we inspect it.
-
----
-
-### Task 4.1: Set Up Test Google Calendar
-
-**Manual step - no code**
-
-1. Go to https://calendar.google.com
-2. Create appointment schedule with test slots
-3. Get public booking link
-4. Update `config/config.json` with the URL
+**Booking URL:**
+```
+https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ0LGgL6SkjqOQUO09O-_RRM2BbFrwq5o5_fgs_VvnFeIx_26OfOFoaAF8Hd0qnAuY3kuS3PuuFB
+```
 
 ---
 
-### Task 4.2: Build Puppeteer Scraper (Iterative)
+### Page Structure (from screenshots)
+
+**Layout:**
+- Left: Monthly calendar picker (January/February 2026)
+- Right: Week view with day columns (T, W, T, F, S, S, M)
+- Time slots appear as buttons (e.g., "3:30pm") under each day
+
+**Key UI Elements:**
+1. **Date selector** - Click dates on left calendar
+2. **Time slot buttons** - e.g., "3:30pm" button
+3. **"No availability during these days"** - Message when no slots
+4. **"Jump to the next bookable date"** - Link to find next available
+5. **Booking form** - First name, Last name, Email, Phone + optional fields
+
+---
+
+### Scenarios to Handle
+
+| # | Scenario | Detection | Action |
+|---|----------|-----------|--------|
+| 1 | Slots visible in current week | Time buttons exist | Extract slot text |
+| 2 | No slots, jump link exists | "Jump to the next bookable date" visible | Click link, wait, extract |
+| 3 | No slots anywhere | "No availability" without jump link | Return empty array |
+| 4 | Page load timeout | Navigation fails | Throw error |
+| 5 | Multiple weeks search | No preferred slot found | Navigate to next week (configurable) |
+| 6 | Booking form | After slot click | Fill required fields only |
+| 7 | Booking confirmation | After form submit | Verify success message |
+
+---
+
+### Task 4.0: Google Apps Script Test Automation (TDD Setup)
+
+**Goal:** Automate test scenario setup by blocking/unblocking calendar times via Apps Script.
+
+**Prerequisites:**
+1. Set wide availability in Google Calendar appointment schedule (Mon-Sun, 9am-9pm)
+2. Install clasp globally: `npm install -g @google/clasp`
+3. Enable Apps Script API at https://script.google.com/home/usersettings
+
+**Files:**
+- Create: `scripts/calendar-test/Code.js`
+- Create: `scripts/calendar-test/appsscript.json`
+
+**Step 1: Install clasp and login**
+
+```bash
+npm install -g @google/clasp
+clasp login
+```
+
+**Step 2: Create Apps Script project**
+
+```bash
+mkdir -p scripts/calendar-test
+cd scripts/calendar-test
+clasp create --type standalone --title "Booking Test Manager"
+```
+
+**Step 3: Create Code.js**
+
+Create `scripts/calendar-test/Code.js`:
+
+```javascript
+// Block a specific time slot
+function blockSlot(dateStr, startHour, endHour) {
+  const cal = CalendarApp.getDefaultCalendar();
+  const date = new Date(dateStr);
+  const start = new Date(date);
+  start.setHours(startHour, 0, 0, 0);
+  const end = new Date(date);
+  end.setHours(endHour, 0, 0, 0);
+  return cal.createEvent('[TEST BLOCK] Reserved', start, end).getId();
+}
+
+// Block entire week
+function blockWeek(weekStartDate) {
+  const start = new Date(weekStartDate);
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + i);
+    blockSlot(day.toISOString(), 0, 24);
+  }
+}
+
+// Clear all test blocks
+function clearAllTestBlocks() {
+  const cal = CalendarApp.getDefaultCalendar();
+  const now = new Date();
+  const future = new Date();
+  future.setMonth(future.getMonth() + 3);
+  const events = cal.getEvents(now, future);
+  let count = 0;
+  events.forEach(e => {
+    if (e.getTitle().includes('[TEST BLOCK]')) {
+      e.deleteEvent();
+      count++;
+    }
+  });
+  return count + ' test blocks cleared';
+}
+
+// Setup: Slots visible this week (clear all blocks)
+function setupSlotsVisible() {
+  clearAllTestBlocks();
+  return 'Scenario: Slots visible - all blocks cleared';
+}
+
+// Setup: No slots this week (block current week)
+function setupNoSlotsThisWeek() {
+  clearAllTestBlocks();
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - now.getDay() + 1);
+  blockWeek(monday.toISOString());
+  return 'Scenario: No slots this week - current week blocked';
+}
+
+// Setup: No availability (block next 4 weeks)
+function setupNoAvailability() {
+  clearAllTestBlocks();
+  const now = new Date();
+  for (let w = 0; w < 4; w++) {
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + (w * 7) - now.getDay() + 1);
+    blockWeek(weekStart.toISOString());
+  }
+  return 'Scenario: No availability - 4 weeks blocked';
+}
+```
+
+**Step 4: Create appsscript.json**
+
+Create `scripts/calendar-test/appsscript.json`:
+
+```json
+{
+  "timeZone": "Asia/Taipei",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/calendar"
+  ]
+}
+```
+
+**Step 5: Push and test**
+
+```bash
+cd scripts/calendar-test
+clasp push
+clasp run setupSlotsVisible
+```
+
+**Step 6: Add npm scripts**
+
+Add to `package.json`:
+
+```json
+{
+  "scripts": {
+    "test:setup:slots-visible": "cd scripts/calendar-test && clasp run setupSlotsVisible",
+    "test:setup:no-slots-week": "cd scripts/calendar-test && clasp run setupNoSlotsThisWeek",
+    "test:setup:no-availability": "cd scripts/calendar-test && clasp run setupNoAvailability",
+    "test:setup:clear": "cd scripts/calendar-test && clasp run clearAllTestBlocks"
+  }
+}
+```
+
+**Step 7: Commit**
+
+```bash
+git add scripts/calendar-test package.json
+git commit -m "feat: add Apps Script test automation for calendar scenarios"
+```
+
+---
+
+### Task 4.1: Update Config with Booking Details
+
+**Files:**
+- Modify: `config/config.json`
+- Modify: `config/config.example.json`
+
+**Step 1: Update config.json**
+
+Add these fields to `config/config.json`:
+
+```json
+{
+  "booking_url": "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ0LGgL6SkjqOQUO09O-_RRM2BbFrwq5o5_fgs_VvnFeIx_26OfOFoaAF8Hd0qnAuY3kuS3PuuFB",
+  "max_weeks_to_search": 4,
+  "first_name": "雅智",
+  "last_name": "許"
+}
+```
+
+**Step 2: Update config.example.json**
+
+Add same fields with placeholder values to `config/config.example.json`.
+
+**Step 3: Commit**
+
+```bash
+git add config/
+git commit -m "feat: add booking URL and name fields to config"
+```
+
+---
+
+### Task 4.2: Build GoogleCalendarScraper
 
 **Files:**
 - Create: `src/scraper.js`
 
-**Step 1: Create basic scraper**
+**Step 1: Create scraper with debug mode**
 
 Create `src/scraper.js`:
 
@@ -1232,6 +1434,7 @@ export class GoogleCalendarScraper {
   constructor(options = {}) {
     this.headless = options.headless ?? true;
     this.debug = options.debug ?? false;
+    this.maxWeeks = options.maxWeeks ?? 4;
   }
 
   async createBrowser() {
@@ -1258,123 +1461,193 @@ export class GoogleCalendarScraper {
       await page.goto(bookingUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
       if (this.debug) {
-        // Take screenshot for debugging
         await page.screenshot({ path: 'debug-page.png', fullPage: true });
         console.log('📸 Screenshot saved to debug-page.png');
-
-        // Log page HTML structure
         const html = await page.content();
         console.log('📄 Page HTML (first 2000 chars):', html.substring(0, 2000));
       }
 
-      // Wait for slots to load
-      // ⚠️ ADJUST SELECTOR based on actual page structure
-      await page.waitForSelector('[role="button"], button, [data-time]', { timeout: 10000 })
-        .catch(() => console.log('⚠️ No slot elements found with default selectors'));
+      // Try to find slots, handle "Jump to next bookable date" scenario
+      let weekSearched = 0;
+      let slots = [];
 
-      // Extract slot information
-      // ⚠️ ADJUST based on actual page structure
-      const slots = await page.evaluate(() => {
-        const results = [];
+      while (weekSearched < this.maxWeeks) {
+        // Check for time slot buttons (e.g., "3:30pm")
+        slots = await this.extractSlots(page);
 
-        // Strategy 1: Look for time buttons
-        const buttons = document.querySelectorAll('[role="button"], button');
-        buttons.forEach(btn => {
-          const text = btn.textContent?.trim() || btn.getAttribute('aria-label') || '';
-          // Filter for time-like patterns
-          if (text.match(/\d{1,2}:\d{2}|am|pm/i)) {
-            results.push({ text, type: 'button' });
-          }
-        });
+        if (slots.length > 0) {
+          console.log(`✅ Found ${slots.length} slots`);
+          return slots;
+        }
 
-        // Strategy 2: Look for data attributes
-        const dataSlots = document.querySelectorAll('[data-time], [data-slot]');
-        dataSlots.forEach(el => {
-          results.push({
-            text: el.textContent?.trim() || el.getAttribute('data-time') || '',
-            type: 'data-attr'
-          });
-        });
+        // Check for "Jump to the next bookable date" link
+        const jumpLink = await page.$('text/Jump to the next bookable date');
+        if (jumpLink) {
+          console.log('📅 No slots this week, jumping to next bookable date...');
+          await jumpLink.click();
+          await page.waitForNetworkIdle({ timeout: 5000 });
+          weekSearched++;
+          continue;
+        }
 
-        return results;
-      });
+        // Check for "No availability" message
+        const noAvailability = await page.$('text/No availability');
+        if (noAvailability) {
+          console.log('❌ No availability found');
+          return [];
+        }
 
-      console.log(`📋 Raw slots found: ${slots.length}`);
-      if (this.debug) {
-        console.log('Raw slots:', slots);
+        weekSearched++;
       }
 
-      // Parse and normalize slots
-      const parsedSlots = slots
-        .map(slot => {
-          const normalized = normalizeSlot(slot.text);
-          if (!normalized) return null;
-          return {
-            text: slot.text,
-            normalized,
-            type: slot.type
-          };
-        })
-        .filter(Boolean);
-
-      console.log(`✅ Parsed slots: ${parsedSlots.length}`);
-      return parsedSlots;
+      console.log(`⚠️ Searched ${weekSearched} weeks, no slots found`);
+      return slots;
 
     } finally {
       await browser.close();
     }
   }
 
-  async book(slot, email) {
-    // TODO: Implement actual booking
-    // This will need to:
-    // 1. Click the slot
-    // 2. Fill in the form (email, name, etc.)
-    // 3. Submit
-    // 4. Verify confirmation
-    console.log(`⚠️ Real booking not implemented yet. Would book: ${slot.text}`);
-    return false;
+  async extractSlots(page) {
+    // Extract time slot buttons
+    // ⚠️ ADJUST SELECTORS based on actual page structure during debug
+    const slots = await page.evaluate(() => {
+      const results = [];
+
+      // Look for buttons containing time patterns (e.g., "3:30pm")
+      const buttons = document.querySelectorAll('button, [role="button"]');
+      buttons.forEach(btn => {
+        const text = btn.textContent?.trim() || '';
+        // Match patterns like "3:30pm", "10:00am"
+        if (text.match(/^\d{1,2}:\d{2}\s*(am|pm)$/i)) {
+          results.push({ text, element: null });
+        }
+      });
+
+      return results;
+    });
+
+    // Normalize slots
+    return slots.map(slot => {
+      const normalized = normalizeSlot(slot.text);
+      return normalized ? { text: slot.text, normalized } : null;
+    }).filter(Boolean);
+  }
+
+  async book(slot, userInfo) {
+    const { email, first_name, last_name } = userInfo;
+    const browser = await this.createBrowser();
+    const page = await browser.newPage();
+
+    try {
+      console.log(`📝 Booking slot: ${slot.text}`);
+
+      // Navigate to booking URL
+      await page.goto(userInfo.booking_url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      // Find and click the matching slot
+      const slotButton = await page.$(`button:has-text("${slot.text}")`);
+      if (!slotButton) {
+        console.log('❌ Could not find slot button');
+        return false;
+      }
+      await slotButton.click();
+
+      // Wait for form to appear
+      await page.waitForSelector('input[name="firstName"], input[placeholder*="First"]', { timeout: 5000 });
+
+      // Fill required fields only
+      // ⚠️ ADJUST SELECTORS based on actual form structure
+      const firstNameInput = await page.$('input[name="firstName"], input[placeholder*="First"]');
+      const lastNameInput = await page.$('input[name="lastName"], input[placeholder*="Last"]');
+      const emailInput = await page.$('input[type="email"], input[name="email"]');
+
+      if (firstNameInput) await firstNameInput.type(first_name);
+      if (lastNameInput) await lastNameInput.type(last_name);
+      if (emailInput) await emailInput.type(email);
+
+      if (this.debug) {
+        await page.screenshot({ path: 'debug-form.png', fullPage: true });
+        console.log('📸 Form screenshot saved to debug-form.png');
+      }
+
+      // Click Book button
+      const bookButton = await page.$('button:has-text("Book"), button[type="submit"]');
+      if (!bookButton) {
+        console.log('❌ Could not find Book button');
+        return false;
+      }
+      await bookButton.click();
+
+      // Wait for confirmation
+      await page.waitForSelector('text/confirmed, text/booked, text/success', { timeout: 10000 })
+        .catch(() => console.log('⚠️ Could not verify booking confirmation'));
+
+      console.log('✅ Booking submitted');
+      return true;
+
+    } catch (error) {
+      console.error('❌ Booking failed:', error.message);
+      return false;
+    } finally {
+      await browser.close();
+    }
   }
 }
 ```
 
-**Step 2: Test scraper in debug mode**
-
-```bash
-node -e "
-import { GoogleCalendarScraper } from './src/scraper.js';
-const scraper = new GoogleCalendarScraper({ headless: false, debug: true });
-const slots = await scraper.scrape('YOUR_TEST_CALENDAR_URL');
-console.log('Found slots:', slots);
-"
-```
-
-**Step 3: Iterate on selectors**
-
-Based on debug output, adjust the selectors in `scraper.js` to match the actual page structure.
-
-**Step 4: Commit working scraper**
+**Step 2: Commit**
 
 ```bash
 git add src/scraper.js
-git commit -m "feat: add Google Calendar scraper (WIP)"
+git commit -m "feat: add GoogleCalendarScraper with multi-week search"
 ```
 
 ---
 
-### Task 4.3: Integrate Real Scraper into CLI
+### Task 4.3: Verify with Playwright MCP (Debug Loop)
+
+**Goal:** Use Playwright MCP to visually verify page structure and adjust selectors.
+
+**TDD Workflow:**
+
+```bash
+# Test 1: Slots visible
+npm run test:setup:slots-visible
+npm run book -- --debug --force
+# Verify: slots extracted correctly
+
+# Test 2: Jump required
+npm run test:setup:no-slots-week
+npm run book -- --debug --force
+# Verify: jump link clicked, next week slots found
+
+# Test 3: No availability
+npm run test:setup:no-availability
+npm run book -- --debug --force
+# Verify: returns empty array
+```
+
+**If selectors need adjustment:**
+1. Check `debug-page.png` screenshot
+2. Use Playwright MCP `browser_snapshot` to get accessibility tree
+3. Update selectors in `src/scraper.js`
+4. Re-run test scenario
+
+---
+
+### Task 4.4: Integrate Scraper into CLI
 
 **Files:**
 - Modify: `src/index.js`
 
-**Step 1: Update CLI to use real scraper when not mocking**
+**Step 1: Update runBooking function**
 
-Add to `src/index.js`:
+Update `src/index.js`:
 
 ```javascript
 import { GoogleCalendarScraper } from './scraper.js';
 
-// In runBooking function, update the service creation:
 async function runBooking() {
   const isDryRun = process.argv.includes('--dry-run');
   const useMock = process.argv.includes('--mock');
@@ -1405,50 +1678,80 @@ async function runBooking() {
   } else {
     scraper = new GoogleCalendarScraper({
       headless: !debug,
-      debug
+      debug,
+      maxWeeks: config.max_weeks_to_search || 4
     });
   }
 
   const service = new BookingService({
-    dryRun: isDryRun,
+    dryRun: isDryRun || useMock,
     scraper
   });
 
-  // ... rest of the function stays the same, but pass null for mockSlots when using scraper
-  const result = await service.attemptBooking(config, mockSlots);
-  // ...
+  try {
+    const result = await service.attemptBooking(config, mockSlots);
+    // ... rest of result handling stays the same
+  } catch (error) {
+    // ... error handling stays the same
+  }
 }
 ```
 
-**Step 2: Test with real calendar**
+**Step 2: Commit**
 
 ```bash
+git add src/index.js
+git commit -m "feat: integrate real scraper into booking CLI"
+```
+
+---
+
+### Task 4.5: End-to-End Test on Real Calendar
+
+**Goal:** Verify complete booking flow works.
+
+**Test Scenario: Full Booking**
+
+```bash
+# 1. Setup: Clear blocks, ensure slots available
+npm run test:setup:slots-visible
+
+# 2. Run booking (dry run first)
+npm run book -- --debug --force --dry-run
+
+# 3. Verify slot extraction and matching
+
+# 4. Run actual booking (optional - creates real appointment)
 npm run book -- --debug --force
 ```
 
-**Step 3: Iterate until working**
-
-Repeat debug → adjust selectors → test until slots are correctly scraped.
-
-**Step 4: Implement actual booking**
-
-Once scraping works, implement the `book()` method to actually click and submit.
-
-**Step 5: Commit**
-
-```bash
-git add src/index.js src/scraper.js
-git commit -m "feat: integrate real scraper into booking flow"
-```
+**Verification Checklist:**
+- [ ] Scraper extracts correct slots from real page
+- [ ] Slots normalized correctly (e.g., "3:30pm" → "tue 3pm" or similar)
+- [ ] Preference matching works with real data
+- [ ] "Jump to next bookable date" navigation works
+- [ ] Multi-week search respects max_weeks config
+- [ ] Booking form fills and submits correctly
+- [ ] Error handling for all scenarios
 
 ---
 
 ### ✅ Slice 4 Checkpoint
 
+**Automated tests:**
+```bash
+# Run all scenarios
+npm run test:setup:slots-visible && npm run book -- --debug --force
+npm run test:setup:no-slots-week && npm run book -- --debug --force
+npm run test:setup:no-availability && npm run book -- --debug --force
+```
+
 **Human verification:**
 - [ ] `npm run book -- --debug --force` shows real slots from test calendar
-- [ ] Slots are correctly normalized and matched
-- [ ] (Optional) Real booking completes on test calendar
+- [ ] Slots are correctly normalized and matched against preferences
+- [ ] "Jump to next bookable date" works when current week has no slots
+- [ ] Real booking completes on test calendar
+- [ ] Email notification sent after successful booking
 
 ---
 
