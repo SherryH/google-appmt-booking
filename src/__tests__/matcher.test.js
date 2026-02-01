@@ -8,6 +8,20 @@ describe('Matcher Module', () => {
       expect(normalizeSlot('THURSDAY 10:00 AM')).toBe('thu 10am');
       expect(normalizeSlot('Tue 3pm')).toBe('tue 3pm');
     });
+
+    test('preserves non-zero minutes (half-hour times)', () => {
+      expect(normalizeSlot('Tuesday 8:30pm')).toBe('tue 8:30pm');
+      expect(normalizeSlot('Wed 9:30 AM')).toBe('wed 9:30am');
+      expect(normalizeSlot('Thursday 8:30pm')).toBe('thu 8:30pm');
+      expect(normalizeSlot('Fri 2:15pm')).toBe('fri 2:15pm');
+      expect(normalizeSlot('Sat 11:45am')).toBe('sat 11:45am');
+    });
+
+    test('drops :00 minutes for cleaner matching', () => {
+      // "3:00pm" should normalize to "3pm" so user can enter either
+      expect(normalizeSlot('Monday 9:00am')).toBe('mon 9am');
+      expect(normalizeSlot('Tuesday 3:00 PM')).toBe('tue 3pm');
+    });
   });
 
   describe('matchPreferences', () => {
@@ -43,6 +57,28 @@ describe('Matcher Module', () => {
     test('handles empty preferences', () => {
       const match = matchPreferences(availableSlots, []);
       expect(match).toBeNull();
+    });
+
+    test('matches half-hour time preferences', () => {
+      const slotsWithHalfHour = [
+        { text: 'Tuesday 8:00pm', normalized: 'tue 8pm' },
+        { text: 'Tuesday 8:30pm', normalized: 'tue 8:30pm' },
+        { text: 'Wednesday 8:30pm', normalized: 'wed 8:30pm' },
+        { text: 'Thursday 8:30pm', normalized: 'thu 8:30pm' },
+      ];
+      const preferences = ['Tue 8:30pm', 'Wed 8:30pm', 'Thu 8:30pm'];
+      const match = matchPreferences(slotsWithHalfHour, preferences);
+      expect(match.normalized).toBe('tue 8:30pm');
+    });
+
+    test('does not match 8pm when looking for 8:30pm', () => {
+      const slotsOnlyFullHour = [
+        { text: 'Tuesday 8:00pm', normalized: 'tue 8pm' },
+        { text: 'Wednesday 8:00pm', normalized: 'wed 8pm' },
+      ];
+      const preferences = ['Tue 8:30pm', 'Wed 8:30pm'];
+      const match = matchPreferences(slotsOnlyFullHour, preferences);
+      expect(match).toBeNull(); // Should NOT match 8pm when looking for 8:30pm
     });
   });
 });

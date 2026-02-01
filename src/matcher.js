@@ -35,7 +35,10 @@ export function normalizeSlot(slotText) {
     if (hour > 12) hour -= 12;
   }
 
-  return `${day} ${hour}${period}`;
+  // Include minutes only if non-zero (e.g., :30, :15, but not :00)
+  const mins = timeMatch[2];
+  const minutes = (mins && mins !== '00') ? `:${mins}` : '';
+  return `${day} ${hour}${minutes}${period}`;
 }
 
 export function matchPreferences(availableSlots, preferences) {
