@@ -3,7 +3,6 @@ import { BookingService } from './booking-service.js';
 import { GoogleCalendarScraper } from './scraper.js';
 import {
   initNotifier,
-  sendBookingSuccess,
   sendBookingFailure,
   shouldNotifyFailure
 } from './notifier.js';
@@ -83,7 +82,8 @@ async function showStatus() {
 async function runBooking() {
   const isDryRun = process.argv.includes('--dry-run');
   const useMock = process.argv.includes('--mock');
-  const isDebug = process.argv.includes('--debug');
+  const isVisible = process.argv.includes('--visible');
+  const isDebug = process.argv.includes('--debug') || isVisible;
 
   console.log('\n🚀 Starting booking attempt...\n');
 
@@ -111,15 +111,15 @@ async function runBooking() {
   if (!useMock) {
     const maxWeeks = config.max_weeks_to_search || 4;
     scraper = new GoogleCalendarScraper({
-      headless: !isDebug,
+      headless: !isVisible,
       debug: isDebug,
       maxWeeks: maxWeeks,
     });
 
     if (isDebug) {
-      console.log('🔧 Debug mode enabled - browser will be visible, screenshots saved');
-      console.log(`📅 Will search up to ${maxWeeks} weeks ahead`);
+      console.log(`🔧 Debug mode - screenshots enabled${isVisible ? ', browser visible' : ''}`);
     }
+    console.log(`📅 Will search up to ${maxWeeks} weeks ahead`);
   }
 
   const service = new BookingService({
@@ -133,11 +133,7 @@ async function runBooking() {
     if (result.success) {
       console.log(`\n🎉 SUCCESS! ${result.dryRun ? '(DRY RUN) Would book' : 'Booked'}: ${result.slot.text}`);
       config.consecutive_failures = 0;
-
-      // Send success email
-      if (!result.dryRun) {
-        await sendBookingSuccess(config.email, result.slot);
-      }
+      // Google Calendar sends confirmation emails to both parties automatically
 
     } else {
       config.consecutive_failures += 1;

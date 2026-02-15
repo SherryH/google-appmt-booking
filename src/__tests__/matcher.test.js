@@ -1,4 +1,4 @@
-import { normalizeSlot, matchPreferences } from '../matcher.js';
+import { normalizeSlot, matchPreferences, extractDayOfWeek } from '../matcher.js';
 
 describe('Matcher Module', () => {
   describe('normalizeSlot', () => {
@@ -21,6 +21,26 @@ describe('Matcher Module', () => {
       // "3:00pm" should normalize to "3pm" so user can enter either
       expect(normalizeSlot('Monday 9:00am')).toBe('mon 9am');
       expect(normalizeSlot('Tuesday 3:00 PM')).toBe('tue 3pm');
+    });
+
+    test('returns null for null input', () => {
+      expect(normalizeSlot(null)).toBeNull();
+    });
+
+    test('returns null for empty string', () => {
+      expect(normalizeSlot('')).toBeNull();
+    });
+
+    test('returns null when no day is present', () => {
+      expect(normalizeSlot('3:00pm')).toBeNull();
+    });
+
+    test('returns null when no time is present', () => {
+      expect(normalizeSlot('Tuesday')).toBeNull();
+    });
+
+    test('handles 24h format', () => {
+      expect(normalizeSlot('Tuesday 20:30')).toBe('tue 8:30pm');
     });
   });
 
@@ -79,6 +99,36 @@ describe('Matcher Module', () => {
       const preferences = ['Tue 8:30pm', 'Wed 8:30pm'];
       const match = matchPreferences(slotsOnlyFullHour, preferences);
       expect(match).toBeNull(); // Should NOT match 8pm when looking for 8:30pm
+    });
+  });
+
+  describe('extractDayOfWeek', () => {
+    test('extracts full day name from abbreviated day', () => {
+      expect(extractDayOfWeek('Thu 8:30pm')).toBe('Thursday');
+    });
+
+    test('extracts day from full day name', () => {
+      expect(extractDayOfWeek('Monday 9am')).toBe('Monday');
+    });
+
+    test('handles lowercase input', () => {
+      expect(extractDayOfWeek('wed 2pm')).toBe('Wednesday');
+    });
+
+    test('extracts day from Saturday slot', () => {
+      expect(extractDayOfWeek('Sat 11:45am')).toBe('Saturday');
+    });
+
+    test('returns null for null input', () => {
+      expect(extractDayOfWeek(null)).toBeNull();
+    });
+
+    test('returns null for empty string', () => {
+      expect(extractDayOfWeek('')).toBeNull();
+    });
+
+    test('returns null when no day is present', () => {
+      expect(extractDayOfWeek('8:30pm')).toBeNull();
     });
   });
 });

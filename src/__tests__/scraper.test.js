@@ -252,6 +252,99 @@ describe('Scraper Logic Tests', () => {
   });
 });
 
+describe('Scenario 6: Calendar search skips non-matching dates to find match weeks later', () => {
+  it('should skip date with only daytime slots and find 8:30pm on a later date', () => {
+    // Simulates real scenario: March 5 has 8 daytime slots (9am-4pm),
+    // March 19 (2 weeks later) has the desired 8:30pm slot.
+    const preferences = ['Thu 8:30pm'];
+
+    // Month calendar shows 2 available Thursdays
+    const availableDatesInMonth = [
+      { day: 5, dayOfWeek: 'Thursday', label: '5, Thursday' },
+      { day: 19, dayOfWeek: 'Thursday', label: '19, Thursday' },
+    ];
+
+    // Slots returned when clicking each date
+    const slotsByDate = {
+      '5, Thursday': [
+        { text: 'Thursday 9:00am', normalized: 'thu 9am' },
+        { text: 'Thursday 10:00am', normalized: 'thu 10am' },
+        { text: 'Thursday 11:00am', normalized: 'thu 11am' },
+        { text: 'Thursday 12:00pm', normalized: 'thu 12pm' },
+        { text: 'Thursday 1:00pm', normalized: 'thu 1pm' },
+        { text: 'Thursday 2:00pm', normalized: 'thu 2pm' },
+        { text: 'Thursday 3:00pm', normalized: 'thu 3pm' },
+        { text: 'Thursday 4:00pm', normalized: 'thu 4pm' },
+      ],
+      '19, Thursday': [
+        { text: 'Thursday 8:30pm', normalized: 'thu 8:30pm' },
+      ],
+    };
+
+    // Simulate calendar-based search
+    const targetDays = ['Thursday'];
+    const matchingDates = availableDatesInMonth.filter(
+      d => targetDays.includes(d.dayOfWeek)
+    );
+
+    let result = null;
+    const checkedDates = [];
+
+    for (const dateEntry of matchingDates) {
+      const slots = slotsByDate[dateEntry.label];
+      checkedDates.push({ label: dateEntry.label, slotCount: slots.length });
+
+      const matched = matchPreferences(slots, preferences);
+      if (matched) {
+        result = matched;
+        break;
+      }
+    }
+
+    // Should have checked March 5 first (no match), then March 19 (match)
+    expect(checkedDates).toHaveLength(2);
+    expect(checkedDates[0].label).toBe('5, Thursday');
+    expect(checkedDates[0].slotCount).toBe(8);
+    expect(checkedDates[1].label).toBe('19, Thursday');
+    expect(checkedDates[1].slotCount).toBe(1);
+
+    expect(result).not.toBeNull();
+    expect(result.normalized).toBe('thu 8:30pm');
+
+    console.log('✅ Scenario 6 PASSED: Skipped 8 daytime slots on March 5, found 8:30pm on March 19');
+    console.log('   Checked dates:', checkedDates.map(d => `${d.label} (${d.slotCount} slots)`).join(' → '));
+    console.log('   Matched:', result.text);
+  });
+
+  it('should return no match when all available dates have only non-matching slots', () => {
+    const preferences = ['Thu 8:30pm'];
+
+    // Only one available Thursday, all daytime
+    const slotsByDate = {
+      '5, Thursday': [
+        { text: 'Thursday 9:00am', normalized: 'thu 9am' },
+        { text: 'Thursday 10:00am', normalized: 'thu 10am' },
+        { text: 'Thursday 3:00pm', normalized: 'thu 3pm' },
+      ],
+    };
+
+    const matchingDates = [{ day: 5, dayOfWeek: 'Thursday', label: '5, Thursday' }];
+
+    let result = null;
+    for (const dateEntry of matchingDates) {
+      const matched = matchPreferences(slotsByDate[dateEntry.label], preferences);
+      if (matched) {
+        result = matched;
+        break;
+      }
+    }
+
+    expect(result).toBeNull();
+
+    console.log('✅ Scenario 6b PASSED: No match when only daytime slots exist');
+  });
+});
+
 describe('Integration: End-to-end workflow', () => {
   it('should complete full booking decision flow', () => {
     // Input: Available slots from scraper

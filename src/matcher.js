@@ -41,6 +41,22 @@ export function normalizeSlot(slotText) {
   return `${day} ${hour}${minutes}${period}`;
 }
 
+const REVERSE_DAY_MAP = {
+  'sun': 'Sunday', 'mon': 'Monday', 'tue': 'Tuesday', 'wed': 'Wednesday',
+  'thu': 'Thursday', 'fri': 'Friday', 'sat': 'Saturday',
+};
+
+export function extractDayOfWeek(preference) {
+  if (!preference) return null;
+  const text = preference.toLowerCase();
+  for (const [full, short] of Object.entries(DAY_MAP)) {
+    if (text.includes(full)) {
+      return REVERSE_DAY_MAP[short];
+    }
+  }
+  return null;
+}
+
 export function matchPreferences(availableSlots, preferences) {
   if (!availableSlots.length || !preferences.length) return null;
 

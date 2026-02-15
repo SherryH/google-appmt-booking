@@ -18,21 +18,6 @@ export function shouldNotifyFailure(consecutiveFailures) {
   return consecutiveFailures > 0 && consecutiveFailures % 3 === 0;
 }
 
-export function formatSuccessEmail(slot) {
-  return {
-    subject: '🎉 Appointment Booked Successfully!',
-    html: `
-      <h1>Your appointment has been booked!</h1>
-      <p><strong>Time:</strong> ${slot.text}</p>
-      <p><strong>Normalized:</strong> ${slot.normalized}</p>
-      <hr>
-      <p style="color: #666; font-size: 12px;">
-        Sent by Therapist Appointment Booker
-      </p>
-    `
-  };
-}
-
 export function formatFailureEmail(reason, consecutiveFailures, availableSlots = []) {
   return {
     subject: `⚠️ Booking Issue (${consecutiveFailures} consecutive failures)`,
@@ -74,11 +59,6 @@ export async function sendEmail(to, { subject, html }) {
     console.error(`📧 Email failed: ${error.message}`);
     return { success: false, error: error.message };
   }
-}
-
-export async function sendBookingSuccess(email, slot) {
-  const content = formatSuccessEmail(slot);
-  return sendEmail(email, content);
 }
 
 export async function sendBookingFailure(email, reason, consecutiveFailures, availableSlots) {

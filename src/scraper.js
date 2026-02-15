@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer';
-import { normalizeSlot } from './matcher.js';
+import { normalizeSlot, extractDayOfWeek, matchPreferences } from './matcher.js';
 import fs from 'fs';
 
 /**
@@ -92,8 +92,9 @@ export class GoogleCalendarScraper {
         () => {
           // Look for time slot buttons OR "no availability" message
           const timeButtons = document.querySelectorAll('button[data-time], [role="button"]');
-          const noAvailMsg = document.body.innerText.includes('No availability') ||
-                            document.body.innerText.includes('no availability');
+          const bodyText = document.body.innerText.toLowerCase();
+          const noAvailMsg = bodyText.includes('no availability') ||
+                            bodyText.includes('no available times');
           return timeButtons.length > 0 || noAvailMsg;
         },
         { timeout: 15000 }
@@ -361,14 +362,28 @@ export class GoogleCalendarScraper {
   }
 
   /**
-   * Check if "No availability" message is shown
+   * Check if "No availability" message is shown (current week)
    */
   async hasNoAvailability() {
     return this.page.evaluate(() => {
       const text = document.body.innerText.toLowerCase();
       return text.includes('no availability') ||
+             text.includes('no available times') ||
              text.includes('no times available') ||
              text.includes('fully booked');
+    });
+  }
+
+  /**
+   * Check if there is absolutely no availability anywhere (terminal state).
+   * Google Calendar shows "No available times in the next year" when there
+   * are zero slots in any future date.
+   */
+  async hasNoAvailabilityAnywhere() {
+    return this.page.evaluate(() => {
+      const text = document.body.innerText.toLowerCase();
+      return text.includes('no available times in the next year') ||
+             text.includes('no available times in the next');
     });
   }
 
@@ -406,11 +421,93 @@ export class GoogleCalendarScraper {
   }
 
   /**
+   * Extract available dates from the mini month calendar sidebar.
+   * Buttons whose aria-label does NOT contain "no available times" are available.
+   * @returns {Array<{day: number, dayOfWeek: string, label: string}>}
+   */
+  async getAvailableDatesFromCalendar() {
+    const dates = await this.page.evaluate(() => {
+      const results = [];
+      // Mini calendar date buttons have aria-labels like "5, Thursday" or "6, Friday, no available times"
+      const buttons = document.querySelectorAll('button[aria-label]');
+      const datePattern = /^(\d{1,2}),\s*(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)/i;
+
+      buttons.forEach(btn => {
+        const label = btn.getAttribute('aria-label') || '';
+        const match = label.match(datePattern);
+        if (!match) return;
+        // Skip dates explicitly marked as unavailable
+        if (label.toLowerCase().includes('no available times')) return;
+
+        results.push({
+          day: parseInt(match[1]),
+          dayOfWeek: match[2],
+          label: label,
+        });
+      });
+      return results;
+    });
+
+    this.log(`Month calendar: ${dates.length} available dates found`);
+    return dates;
+  }
+
+  /**
+   * Click a specific date in the mini month calendar by its aria-label.
+   * @param {string} label - The aria-label to match (e.g. "5, Thursday")
+   */
+  async clickCalendarDate(label) {
+    const clicked = await this.page.evaluate((targetLabel) => {
+      const btn = document.querySelector(`button[aria-label="${targetLabel}"]`);
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }, label);
+
+    if (clicked) {
+      this.log(`Clicked calendar date: "${label}"`);
+      // Wait for week view to update after clicking a date
+      await new Promise(r => setTimeout(r, 2000));
+      await this.waitForCalendarLoad();
+    } else {
+      this.log(`Calendar date not found: "${label}"`);
+    }
+    return clicked;
+  }
+
+  /**
+   * Navigate to the next month in the mini calendar sidebar.
+   */
+  async navigateToNextMonth() {
+    try {
+      const clicked = await this.page.evaluate(() => {
+        const btn = document.querySelector('button[aria-label="Next month"]');
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (clicked) {
+        this.log('Navigated to next month in mini calendar');
+        await new Promise(r => setTimeout(r, 1500));
+        return true;
+      }
+      this.log('Next month button not found');
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Main scrape function - extracts all available slots
    * @param {string} bookingUrl - The Google Calendar booking URL
+   * @param {Array<string>} preferences - User preferences like ["Thu 8:30pm"]
    * @returns {Array<{text: string, normalized: string, date?: string}>}
    */
-  async scrape(bookingUrl) {
+  async scrape(bookingUrl, preferences = []) {
     try {
       await this.init();
       this.log(`Navigating to: ${bookingUrl}`);
@@ -426,83 +523,192 @@ export class GoogleCalendarScraper {
       await this.waitForCalendarLoad();
       await this.saveDebugScreenshot('debug-loaded.png');
 
-      let allSlots = [];
-      let weekCount = 0;
-
-      while (weekCount < this.maxWeeks) {
-        this.log(`Checking week ${weekCount + 1}/${this.maxWeeks}`);
-
-        // Try to extract slots with day context
-        let slots = await this.extractSlotsWithDays();
-
-        if (slots.length === 0) {
-          // Fallback to flat extraction
-          const flatSlots = await this.extractSlotsFlat();
-          slots = flatSlots.map((s, i) => ({
-            text: s.day ? `${s.day} ${s.text}` : s.text,
-            normalized: s.day ? normalizeSlot(`${s.day} ${s.text}`) : null,
-            index: s.index,
-          })).filter(s => s.normalized);
-        }
-
-        this.log(`Found ${slots.length} slots in current view`);
-
-        if (slots.length > 0) {
-          allSlots = [...allSlots, ...slots];
-          // If we found slots, we might still want to check more weeks
-          // But for efficiency, return what we found
-          break;
-        }
-
-        // No slots found - check for "no availability" or try to jump/navigate
-        if (await this.hasNoAvailability()) {
-          this.log('No availability message detected');
-
-          // Try to jump to next bookable date
-          const jumped = await this.tryJumpToNextDate();
-          if (jumped) {
-            weekCount++; // Count as advancing
-            await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
-            continue;
-          }
-
-          // If no jump link, try navigating to next week
-          const navigated = await this.navigateToNextWeek();
-          if (navigated) {
-            weekCount++;
-            await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
-            continue;
-          }
-
-          // Can't advance - no more slots
-          break;
-        }
-
-        // Try to advance to next week
-        const advanced = await this.navigateToNextWeek() || await this.tryJumpToNextDate();
-        if (!advanced) {
-          break;
-        }
-
-        weekCount++;
-        await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
+      // Check terminal state early
+      if (await this.hasNoAvailabilityAnywhere()) {
+        this.log('No available times in the next year - stopping search');
+        return [];
       }
 
-      await this.saveDebugHtml('debug-final.html');
-      await this.saveDebugScreenshot('debug-final.png');
+      // Determine target days-of-week from preferences
+      const targetDays = [...new Set(
+        preferences.map(p => extractDayOfWeek(p)).filter(Boolean)
+      )];
+      this.log(`Target days from preferences: ${targetDays.length ? targetDays.join(', ') : '(any)'}`);
 
-      this.log(`Total slots found: ${allSlots.length}`);
-      return allSlots;
+      // If we have preferences with target days, use the month calendar approach
+      if (targetDays.length > 0) {
+        return await this._scrapeWithCalendar(targetDays, preferences);
+      }
+
+      // No preferences — fall back to original week-by-week approach
+      return await this._scrapeWeekByWeek();
 
     } catch (error) {
       this.log('Scrape error', error.message);
       await this.saveDebugScreenshot('debug-error.png');
+      // Close browser on scrape error since booking won't follow
+      await this.close();
       throw error;
-    } finally {
-      if (!this.debug) {
-        await this.close();
+    }
+    // Browser intentionally left open — caller (booking-service) is
+    // responsible for closing via scraper.close() after book() completes.
+  }
+
+  /**
+   * Preference-aware scraping using the month calendar sidebar.
+   * Clicks only on dates that match a target day-of-week and have availability.
+   */
+  async _scrapeWithCalendar(targetDays, preferences) {
+    const maxMonths = this.maxWeeks; // Search up to N months (generous)
+    let monthsSearched = 0;
+
+    // If current view has no availability at all, try "Jump to next bookable date"
+    // to fast-forward to a month that does have slots
+    if (await this.hasNoAvailability()) {
+      this.log('No availability in current view, trying jump to next bookable date');
+      const jumped = await this.tryJumpToNextDate();
+      if (jumped) {
+        this.log('Jumped to next bookable date');
+        if (await this.hasNoAvailabilityAnywhere()) {
+          this.log('No available times in the next year - stopping search');
+          return [];
+        }
       }
     }
+
+    while (monthsSearched < maxMonths) {
+      this.log(`Checking month ${monthsSearched + 1}/${maxMonths}`);
+
+      const availableDates = await this.getAvailableDatesFromCalendar();
+
+      // Filter to dates matching target days-of-week
+      const matchingDates = availableDates.filter(
+        d => targetDays.includes(d.dayOfWeek)
+      );
+      this.log(`Month has ${availableDates.length} available dates, ${matchingDates.length} match target days`);
+
+      for (const dateEntry of matchingDates) {
+        const clicked = await this.clickCalendarDate(dateEntry.label);
+        if (!clicked) continue;
+
+        await this.saveDebugScreenshot(`debug-cal-${dateEntry.label.replace(/\s/g, '-')}.png`);
+
+        // Extract slots from the week view that loaded
+        const slots = await this.extractSlotsWithDays();
+        this.log(`After clicking "${dateEntry.label}": found ${slots.length} slots`);
+
+        if (slots.length > 0) {
+          // Check if any slot matches a preference
+          const matched = matchPreferences(slots, preferences);
+          if (matched) {
+            this.log(`Found matching slot: ${matched.text}`);
+            await this.saveDebugScreenshot('debug-final.png');
+            return slots; // Return all slots from this view so booking-service can pick
+          }
+          this.log(`No preference match in slots for "${dateEntry.label}", continuing search`);
+        }
+      }
+
+      // No match in this month — go to next month
+      const advanced = await this.navigateToNextMonth();
+      if (!advanced) {
+        this.log('Cannot advance to next month, stopping');
+        break;
+      }
+      monthsSearched++;
+
+      if (await this.hasNoAvailabilityAnywhere()) {
+        this.log('No available times in the next year - stopping search');
+        break;
+      }
+    }
+
+    await this.saveDebugHtml('debug-final.html');
+    await this.saveDebugScreenshot('debug-final.png');
+    this.log('No matching slots found across searched months');
+    return [];
+  }
+
+  /**
+   * Original week-by-week scraping (no preference filtering).
+   * Used when no preferences are provided.
+   */
+  async _scrapeWeekByWeek() {
+    let allSlots = [];
+    let weekCount = 0;
+
+    while (weekCount < this.maxWeeks) {
+      this.log(`Checking week ${weekCount + 1}/${this.maxWeeks}`);
+
+      // Try to extract slots with day context
+      let slots = await this.extractSlotsWithDays();
+
+      if (slots.length === 0) {
+        // Fallback to flat extraction
+        const flatSlots = await this.extractSlotsFlat();
+        slots = flatSlots.map((s) => ({
+          text: s.day ? `${s.day} ${s.text}` : s.text,
+          normalized: s.day ? normalizeSlot(`${s.day} ${s.text}`) : null,
+          index: s.index,
+        })).filter(s => s.normalized);
+      }
+
+      this.log(`Found ${slots.length} slots in current view`);
+
+      if (slots.length > 0) {
+        allSlots = [...allSlots, ...slots];
+        break;
+      }
+
+      // Check for terminal "no availability anywhere" first
+      if (await this.hasNoAvailabilityAnywhere()) {
+        this.log('No available times in the next year - stopping search');
+        break;
+      }
+
+      // No slots found - check for "no availability" or try to jump/navigate
+      if (await this.hasNoAvailability()) {
+        this.log('No availability message detected');
+
+        // Try to jump to next bookable date
+        const jumped = await this.tryJumpToNextDate();
+        if (jumped) {
+          weekCount++;
+          await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
+
+          if (await this.hasNoAvailabilityAnywhere()) {
+            this.log('No available times in the next year after jump - stopping search');
+            break;
+          }
+          continue;
+        }
+
+        // If no jump link, try navigating to next week
+        const navigated = await this.navigateToNextWeek();
+        if (navigated) {
+          weekCount++;
+          await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
+          continue;
+        }
+
+        break;
+      }
+
+      // Try to advance to next week
+      const advanced = await this.navigateToNextWeek() || await this.tryJumpToNextDate();
+      if (!advanced) {
+        break;
+      }
+
+      weekCount++;
+      await this.saveDebugScreenshot(`debug-week-${weekCount}.png`);
+    }
+
+    await this.saveDebugHtml('debug-final.html');
+    await this.saveDebugScreenshot('debug-final.png');
+
+    this.log(`Total slots found: ${allSlots.length}`);
+    return allSlots;
   }
 
   /**

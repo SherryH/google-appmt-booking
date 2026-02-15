@@ -1,4 +1,4 @@
-import { shouldNotifyFailure, formatSuccessEmail, formatFailureEmail } from '../notifier.js';
+import { shouldNotifyFailure, formatFailureEmail } from '../notifier.js';
 
 describe('Notifier Module', () => {
   describe('shouldNotifyFailure', () => {
@@ -21,17 +21,9 @@ describe('Notifier Module', () => {
       expect(shouldNotifyFailure(5)).toBe(false);
       expect(shouldNotifyFailure(7)).toBe(false);
     });
-  });
 
-  describe('formatSuccessEmail', () => {
-    test('formats success email correctly', () => {
-      const result = formatSuccessEmail({
-        text: 'Tuesday 3:00 PM',
-        normalized: 'tue 3pm'
-      });
-
-      expect(result.subject).toContain('Booked');
-      expect(result.html).toContain('Tuesday 3:00 PM');
+    test('returns false for 0 failures', () => {
+      expect(shouldNotifyFailure(0)).toBe(false);
     });
   });
 
@@ -42,6 +34,15 @@ describe('Notifier Module', () => {
       expect(result.subject).toContain('Issue');
       expect(result.html).toContain('no_match');
       expect(result.html).toContain('3');
+    });
+
+    test('does not include slots list section when availableSlots is empty', () => {
+      const result = formatFailureEmail('no_slots', 3, []);
+
+      expect(result.subject).toContain('Issue');
+      expect(result.html).toContain('no_slots');
+      expect(result.html).not.toContain('<ul>');
+      expect(result.html).not.toContain('Available slots were');
     });
   });
 });
